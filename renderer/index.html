@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src blob:" />
+  <title>Aside</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="panel">
+    <header id="bar">
+      <button id="listenBtn" class="pill" title="Listen (⌘⇧L)">
+        <span class="dot"></span><span id="listenLabel">Listen</span>
+      </button>
+      <div id="caption" class="caption"></div>
+      <div class="actions">
+        <button id="answerBtn" class="ghost" title="Answer now (⌘↵)">Answer <kbd>⌘↵</kbd></button>
+        <button id="recapBtn" class="ghost" title="Summary, next steps and follow-up email">Recap</button>
+        <button id="askBtn" class="icon" title="Ask something (⌘⇧↵)" aria-label="Ask">
+          <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button id="transcriptBtn" class="icon" title="Transcript" aria-label="Transcript">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+        <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button id="hideBtn" class="icon" title="Hide (⌘\)" aria-label="Hide">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="notice" hidden></div>
+
+    <section id="transcriptView" class="view" hidden>
+      <div id="transcriptList"></div>
+    </section>
+
+    <section id="ask" class="view" hidden>
+      <textarea id="askInput" rows="1" placeholder="Ask anything: explain this code, answer a question, or suggest what to say next."></textarea>
+      <div class="hint">Enter to send, Esc to cancel</div>
+    </section>
+
+    <section id="answers" class="view" hidden></section>
+
+    <section id="settings" class="view" hidden>
+      <div id="welcome" hidden>
+        <h2>Welcome to Aside</h2>
+        <p>Local transcription is ready. Choose how you want to get answers.</p>
+        <p class="sub">Use Claude Code if you already have it installed and signed in, or paste an Anthropic API key below. API usage is billed by Anthropic.</p>
+      </div>
+      <div class="field">
+        <label>Answers come from</label>
+        <div class="seg" id="providerSeg">
+          <button data-v="max">Claude Code</button>
+          <button data-v="api">Anthropic API key</button>
+        </div>
+        <p class="sub" id="providerNote"></p>
+      </div>
+      <div class="field">
+        <label>Model</label>
+        <div class="seg" id="modelSeg">
+          <button data-v="haiku">Haiku: fastest</button>
+          <button data-v="sonnet">Sonnet: balanced</button>
+          <button data-v="opus">Opus: smartest</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Live transcription</label>
+        <div class="seg" id="transcriptionSeg">
+          <button data-v="local">Local Whisper</button>
+          <button data-v="deepgram">Deepgram</button>
+        </div>
+        <p class="sub" id="transcriptionNote">Runs on this Mac. No key or transcription bill. Text appears after a short pause.</p>
+      </div>
+      <div class="field" id="deepgramField">
+        <label for="deepgramKey">Deepgram key, for live transcription</label>
+        <input id="deepgramKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste key" />
+        <p class="sub">Requires a Deepgram account. <a href="#" data-href="https://console.deepgram.com/signup">Get a key</a></p>
+      </div>
+      <div class="field" id="anthropicField">
+        <label for="anthropicKey">Anthropic API key</label>
+        <p class="sub"><a href="#" data-href="https://console.anthropic.com/">Create an API key</a></p>
+        <input id="anthropicKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" />
+      </div>
+      <div class="field">
+        <label for="about">Your context and playbook</label>
+        <textarea id="about" rows="7" placeholder="Your role, team, projects, technical stack, product, pricing and useful background. Include facts you want the assistant to know."></textarea>
+      </div>
+      <div class="field">
+        <label>Mac permissions</label>
+        <p class="sub">When you click Listen, allow microphone and Screen Recording access so Aside can hear you and the call.</p>
+        <div class="row">
+          <button class="ghost" data-href="x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture">Screen Recording</button>
+          <button class="ghost" data-href="x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone">Microphone</button>
+        </div>
+      </div>
+      <div class="row end">
+        <button class="ghost" id="quitBtn">Quit Aside</button>
+        <span class="spacer"></span>
+        <button class="ghost" id="cancelSettings">Cancel</button>
+        <button class="primary" id="saveSettings">Save</button>
+      </div>
+    </section>
+
+    <footer id="hints">
+      <span><kbd>⌘↵</kbd> answer</span>
+      <span><kbd>⌘⇧↵</kbd> ask</span>
+      <span><kbd>⌘⇧L</kbd> listen</span>
+      <span><kbd>⌘⇧⌫</kbd> clear</span>
+      <span><kbd>⌘\</kbd> hide</span>
+      <label class="screen-option"><input id="includeScreen" type="checkbox" checked /> Screen</label>
+    </footer>
+  </div>
+
+  <script src="../node_modules/marked/lib/marked.umd.js"></script>
+  <script src="../node_modules/dompurify/dist/purify.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

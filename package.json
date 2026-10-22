@@ -1,0 +1,26 @@
+{
+  "name": "aside",
+  "productName": "Aside",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A private overlay that listens to your calls and answers on a hotkey.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:audio": "mkdir -p bin && swiftc -O -swift-version 5 -target arm64-apple-macos14 native/AsideAudio.swift -o bin/aside-audio",
+    "build": "./build.sh",
+    "setup": "bash ./setup.sh",
+    "test": "node --test tests/local-transcriber.test.cjs",
+    "build:whisper": "bash scripts/build-whisper.sh",
+    "dist": "npm run build:whisper && npm run build && bash scripts/create-dmg.sh"
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "marked": "18.1.1",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.0.0"
+  }
+}
