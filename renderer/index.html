@@ -33,6 +33,24 @@
 
     <div id="notice" hidden></div>
 
+    <section id="screenshots" class="view" aria-label="Screenshot queue">
+      <div class="shots-toolbar">
+        <button id="shotsToggle" class="ghost" type="button" aria-expanded="false" aria-controls="shotsGallery" title="Preview screenshots (⌘⌥P)">Screenshots <span id="shotsCount">0</span></button>
+        <span id="shotsHint" class="shots-hint">Capture, scroll, capture again</span>
+        <button id="captureShot" class="ghost" type="button" title="Capture screenshot (⌘⌥S)">Capture <kbd>⌘⌥S</kbd></button>
+        <button id="clearShots" class="ghost" type="button" disabled title="Clear screenshots (⌘⌥⇧⌫)">Clear</button>
+      </div>
+      <div id="shotsGallery" hidden>
+        <p id="shotsEmpty" class="shots-empty">No screenshots queued. Capture each view before asking.</p>
+        <div id="shotsList" class="shots-list" aria-label="Queued screenshots"></div>
+        <figure id="shotPreview" hidden>
+          <img id="shotPreviewImage" alt="" />
+          <figcaption id="shotPreviewCaption"></figcaption>
+        </figure>
+        <p class="shots-help">← → browse · Delete removes · Esc closes · queued screenshots send with your next answer</p>
+      </div>
+    </section>
+
     <section id="transcriptView" class="view" hidden>
       <div id="transcriptList"></div>
     </section>
@@ -57,6 +75,19 @@
           <button data-v="api">Anthropic API key</button>
         </div>
         <p class="sub" id="providerNote"></p>
+      </div>
+      <div class="field" id="harnessField">
+        <label class="harness-toggle" for="useHarness"><input id="useHarness" type="checkbox" checked /> Use my Claude harness</label>
+        <p class="sub">Your Claude instructions, memories, and skills. Read-only tools; no file edits or commands.</p>
+        <div id="projectField">
+          <label for="projectPath">Project</label>
+          <div class="row project-picker">
+            <input id="projectPath" type="text" readonly placeholder="No project selected" aria-label="Selected project folder" />
+            <button class="ghost" id="pickProject" type="button">Choose folder…</button>
+            <button class="ghost" id="clearProject" type="button" hidden>Clear</button>
+          </div>
+          <p class="sub">Choose a folder to use its project context and memory.</p>
+        </div>
       </div>
       <div class="field">
         <label>Model</label>
@@ -110,12 +141,18 @@
       <span><kbd>⌘⇧L</kbd> listen</span>
       <span><kbd>⌘⇧⌫</kbd> clear</span>
       <span><kbd>⌘\</kbd> hide</span>
-      <label class="screen-option"><input id="includeScreen" type="checkbox" checked /> Screen</label>
+      <span title="Capture the current view and add it to the screenshot queue"><kbd>⌘⌥S</kbd> capture</span>
+      <span title="Open screenshot previews; arrows browse, Delete removes, Escape closes"><kbd>⌘⌥P</kbd> preview</span>
+      <span title="Remove the last queued screenshot"><kbd>⌘⌥⌫</kbd> remove last</span>
+      <span title="Clear all queued screenshots"><kbd>⌘⌥⇧⌫</kbd> clear shots</span>
+      <label class="screen-option"><input id="includeScreen" type="checkbox" checked /> Auto screen</label>
     </footer>
   </div>
 
   <script src="../node_modules/marked/lib/marked.umd.js"></script>
   <script src="../node_modules/dompurify/dist/purify.min.js"></script>
+  <script src="../node_modules/@highlightjs/cdn-assets/highlight.min.js"></script>
+  <script src="markdown.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

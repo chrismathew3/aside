@@ -1,6 +1,6 @@
 const {
   app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer,
-  systemPreferences, safeStorage, shell, Tray, Menu, nativeImage,
+  systemPreferences, safeStorage, shell, Tray, Menu, nativeImage, dialog,
 } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -9,14 +9,17 @@ const readline = require('node:readline');
 const { spawn } = require('node:child_process');
 const WebSocket = require('ws');
 const { SYSTEM_PROMPT } = require('./prompt');
+const { buildClaudeLaunch } = require('./harness');
+const { createScreenshotQueue } = require('./screenshot-queue');
 const { createLocalTranscriber } = require('./local-transcriber');
+const { configureWindowSizing } = require('./window-sizing');
 
 app.setName('Aside');
 if (!app.requestSingleInstanceLock()) app.quit();
 
 // ---------- settings ----------
 const SECRET_KEYS = ['deepgramKey', 'anthropicKey'];
-const DEFAULTS = { provider: 'max', model: 'sonnet', transcription: 'local', deepgramKey: '', anthropicKey: '', about: '', claudePath: '', onboardingDone: false };
+const DEFAULTS = { provider: 'max', model: 'sonnet', transcription: 'local', deepgramKey: '', anthropicKey: '', about: '', claudePath: '', onboardingDone: false, useHarness: true, projectPath: '' };
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
 
 function loadConfig() {
@@ -65,7 +68,9 @@ function createWindow() {
     transparent: true,
     backgroundColor: '#00000000',
     hasShadow: false,
-    resizable: false,
+    resizable: true,
+    minWidth: 560,
+    minHeight: 96,
     movable: true,
     minimizable: false,
     maximizable: false,
@@ -83,11 +88,12 @@ function createWindow() {
     },
   });
 
+  configureWindowSizing(win, { ipcMain, screen });
+
   // Request OS content protection for private notes; capture behavior varies by app and macOS version.
   win.setContentProtection(true);
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  if (process.platform === 'darwin') app.dock?.show();
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -114,13 +120,6 @@ function toggleOverlay() {
   else showOverlay();
 }
 
-ipcMain.on('resize', (_e, { height }) => {
-  if (!win) return;
-  const { workArea } = screen.getDisplayMatching(win.getBounds());
-  const h = Math.max(48, Math.min(Math.round(height), Math.round(workArea.height * 0.85)));
-  const b = win.getBounds();
-  if (b.height !== h) win.setBounds({ x: b.x, y: b.y, width: WIDTH, height: h });
-});
 ipcMain.on('focus', () => { app.focus({ steal: true }); win.focus(); });
 // Give focus back to the call app after typing in Aside.
 ipcMain.on('blur', () => {
@@ -161,15 +160,39 @@ function setActiveShortcuts(on) {
 // ---------- screenshot ----------
 async function captureScreen() {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const longEdge = 1568;
+  const longEdge = 2000;
   const { width, height } = display.size;
   const scale = longEdge / Math.max(width, height);
   const thumbnailSize = { width: Math.round(width * scale), height: Math.round(height * scale) };
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize });
   const src = sources.find((s) => s.display_id === String(display.id)) || sources[0];
   if (!src || src.thumbnail.isEmpty()) return null;
-  return src.thumbnail.toJPEG(75).toString('base64');
+  return src.thumbnail.toJPEG(85).toString('base64');
 }
+
+// The queue is session-only; image data is never written to settings or disk.
+const screenshotQueue = createScreenshotQueue({
+  capture: async () => {
+    const wasVisible = win && !win.isDestroyed() && win.isVisible();
+    if (wasVisible) win.hide();
+    try {
+      // Let the compositor remove Aside before capturing the underlying page.
+      if (wasVisible) await new Promise(resolve => setTimeout(resolve, 100));
+      return await captureScreen();
+    } finally {
+      if (wasVisible && win && !win.isDestroyed()) win.showInactive();
+    }
+  },
+  onChange: entries => send('screenshots-changed', entries),
+});
+async function queueScreenshot() {
+  try { await screenshotQueue.capture(); return { ok: true }; }
+  catch (error) { if (error.code !== 'CAPTURE_CLEARED') send('status', { error: error.message }); return { ok: false, error: error.message }; }
+}
+ipcMain.handle('screenshots-get', () => screenshotQueue.snapshot());
+ipcMain.handle('screenshots-capture', () => queueScreenshot());
+ipcMain.on('screenshots-remove', (_event, { id } = {}) => screenshotQueue.remove(id));
+ipcMain.on('screenshots-clear', () => screenshotQueue.clear());
 
 // ---------- transcription (Deepgram) ----------
 let transcriptEpoch = 0;
@@ -352,23 +375,16 @@ class ClaudeSession {
   constructor() {
     const bin = findClaude();
     if (!bin) throw new Error('Could not find the claude command. Install Claude Code or set its path in Settings.');
-    const cwd = path.join(app.getPath('userData'), 'claude-cwd');
-    fs.mkdirSync(cwd, { recursive: true });
-    this.proc = spawn(bin, [
-      '-p',
-      '--input-format', 'stream-json',
-      '--output-format', 'stream-json',
-      '--include-partial-messages',
-      '--verbose',
-      '--tools', '',
-      '--strict-mcp-config',
-      '--setting-sources', '',
-      '--no-session-persistence',
-      '--model', cfg.model || 'sonnet',
-      '--system-prompt', systemPrompt(),
-    ], {
+    const isolatedCwd = path.join(app.getPath('userData'), 'claude-cwd');
+    fs.mkdirSync(isolatedCwd, { recursive: true });
+    const { cwd, args } = buildClaudeLaunch({ cfg, home: os.homedir(), isolatedCwd, asidePrompt: systemPrompt() });
+    // Leave the default config directory implicit: an explicit override changes
+    // Claude Code's credential lookup even when it names the same directory.
+    const claudeEnv = { ...process.env, PATH: `${path.dirname(bin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` };
+    delete claudeEnv.CLAUDE_CONFIG_DIR;
+    this.proc = spawn(bin, args, {
       cwd,
-      env: { ...process.env, PATH: `${path.dirname(bin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` },
+      env: claudeEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.dead = false;
@@ -405,6 +421,7 @@ class ClaudeSession {
     if (!this.turn) return;
     if (m.type === 'stream_event') {
       const ev = m.event;
+      if (ev?.type === 'content_block_start' && ev.content_block?.type === 'tool_use') this.turn.onStep?.(ev.content_block.name === 'Skill' ? 'skill' : 'context');
       if (ev?.type === 'content_block_delta' && ev.delta?.type === 'text_delta') this.turn.onDelta(ev.delta.text);
     } else if (m.type === 'result') {
       const t = this.turn;
@@ -518,18 +535,28 @@ function cancelAnswer() {
 
 ipcMain.on('answer', async (_e, { id, transcript, question, withScreen }) => {
   cancelAnswer();
-  const request = { controller: new AbortController(), session: null };
+  const request = { controller: new AbortController(), session: null, screenshotIds: [] };
   inflight = request;
   const current = () => inflight === request && !request.controller.signal.aborted;
   const h = {
+    onStep: (step) => { if (current()) send('ai-step', { id, step }); },
     onDelta: (text) => { if (current()) send('ai-delta', { id, text }); },
-    onDone: () => { if (current()) { inflight = null; send('ai-done', { id }); } },
+    onDone: () => { if (current()) { screenshotQueue.consume(request.screenshotIds); inflight = null; send('ai-done', { id }); } },
     onError: (error) => { if (current()) { inflight = null; send('ai-error', { id, error }); } },
   };
 
   try {
     const content = [];
-    if (withScreen) {
+    await screenshotQueue.settled();
+    if (!current()) return;
+    const screenshots = screenshotQueue.snapshot();
+    request.screenshotIds = screenshots.map(shot => shot.id);
+    if (screenshots.length) {
+      screenshots.forEach((shot, index) => {
+        content.push({ type: 'text', text: `Screenshot ${index + 1} of ${screenshots.length} (capture order; views may overlap):` });
+        content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.data } });
+      });
+    } else if (withScreen) {
       send('ai-step', { id, step: 'screen' });
       const jpeg = await captureScreen();
       if (!current()) return;
@@ -562,6 +589,7 @@ ipcMain.on('answer', async (_e, { id, transcript, question, withScreen }) => {
 });
 
 ipcMain.on('clear', () => {
+  screenshotQueue.clear();
   transcriptEpoch++;
   if (listening) {
     listening.me.close();
@@ -573,6 +601,13 @@ ipcMain.on('clear', () => {
 });
 
 // ---------- settings IPC ----------
+ipcMain.handle('pick-project', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Choose a project', properties: ['openDirectory'],
+    defaultPath: cfg.projectPath || path.join(os.homedir(), 'Desktop'),
+  });
+  return result.canceled ? null : { path: fs.realpathSync(result.filePaths[0]) };
+});
 ipcMain.handle('get-settings', () => ({
   ...cfg,
   transcriptEpoch,
@@ -592,11 +627,17 @@ ipcMain.handle('get-settings', () => ({
 }));
 ipcMain.handle('save-settings', (_e, next) => {
   const merged = { ...cfg };
-  for (const k of ['provider', 'model', 'about', 'claudePath', 'transcription', 'onboardingDone']) if (k in next) merged[k] = next[k];
+  for (const k of ['provider', 'model', 'about', 'claudePath', 'transcription', 'onboardingDone', 'useHarness', 'projectPath']) if (k in next) merged[k] = next[k];
   for (const k of SECRET_KEYS) {
     if (typeof next[k] === 'string' && !next[k].startsWith('••')) merged[k] = next[k].trim();
   }
   if (!['local', 'deepgram'].includes(merged.transcription)) throw new Error('Unknown transcription provider.');
+  merged.useHarness = merged.useHarness !== false;
+  if (typeof merged.projectPath !== 'string') throw new Error('Choose a valid project folder.');
+  if (merged.projectPath) {
+    merged.projectPath = fs.realpathSync(merged.projectPath);
+    if (!fs.statSync(merged.projectPath).isDirectory()) throw new Error('Project must be a folder.');
+  }
   stopListening();
   cfg = merged;
   saveConfig(cfg);
@@ -630,6 +671,15 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   globalShortcut.register('CommandOrControl+\\', toggleOverlay);
+  const captureShortcuts = {
+    'CommandOrControl+Alt+S': () => { void queueScreenshot(); },
+    'CommandOrControl+Alt+P': () => { showOverlay(); send('hotkey', 'screenshots-preview'); },
+    'CommandOrControl+Alt+Backspace': () => screenshotQueue.removeLast(),
+    'CommandOrControl+Alt+Shift+Backspace': () => screenshotQueue.clear(),
+  };
+  for (const [accelerator, action] of Object.entries(captureShortcuts)) {
+    if (!globalShortcut.register(accelerator, action)) send('status', { error: `Screenshot shortcut unavailable: ${accelerator}` });
+  }
   setTimeout(warmSpare, 2000);
 });
 

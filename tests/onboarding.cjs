@@ -1,4 +1,5 @@
 const {app,BrowserWindow,ipcMain}=require('electron');
+ipcMain.handle('screenshots-get', () => []);
 const path=require('node:path');
 const assert=require('node:assert/strict');
 let saved;
